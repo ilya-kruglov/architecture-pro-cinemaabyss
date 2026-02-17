@@ -1,4 +1,4 @@
-@startuml
+@startuml Кинобездна - To-Be архитектура (C4 контейнеры)
 title Кинобездна - To-Be архитектура (C4 контейнеры)
 
 skinparam component {

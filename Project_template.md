@@ -9,7 +9,7 @@
     - **Auth Service:** Аутентификация и базовые профили.
     - **User Service:** Пользовательские данные (избранное, оценки).
     - **Payment Service:** Платежи и подписки.
-    - **Metadata Service:** Информация о фильмах.
+    - **Metadata Service:** Сервис метаданных о фильмах `movies`.
     - **Content Service:** Видео-контент и работа с S3.
 2. **Единая точка входа**
 Внедрен **API Gateway**, который принимает все запросы от клиентов (Smart TV, мобильные приложения, веб), маршрутизирует их к соответствующим микросервисам, агрегирует данные при необходимости и применяет общие политики (аутентификация, rate limiting, логирование). Это решает проблему разнородных клиентов с разными потребностями в данных.
@@ -32,51 +32,83 @@
 ### 1. Proxy
 Команда КиноБездны уже выделила сервис метаданных о фильмах movies и вам необходимо реализовать бесшовный переход с применением паттерна Strangler Fig в части реализации прокси-сервиса (API Gateway), с помощью которого можно будет постепенно переключать траффик, используя фиче-флаг.
 
+Реализован сервис на Go в `./src/microservices/proxy` с поддержкой:
+- Проксирования запросов к монолиту (`/api/users`, `/api/payments`, `/api/subscriptions`).
+- Проксирования запросов к movies-сервису с поддержкой процентного переключения трафика.
+- Проксирования запросов к events-сервису (`/api/events/*`).
+- Фиче-флага `GRADUAL_MIGRATION` и процентного распределения `MOVIES_MIGRATION_PERCENT`.
 
-Реализуйте сервис на любом языке программирования в ./src/microservices/proxy.
-Конфигурация для запуска сервиса через docker-compose уже добавлена
-```yaml
-  proxy-service:
-    build:
-      context: ./src/microservices/proxy
-      dockerfile: Dockerfile
-    container_name: cinemaabyss-proxy-service
-    depends_on:
-      - monolith
-      - movies-service
-      - events-service
-    ports:
-      - "8000:8000"
-    environment:
-      PORT: 8000
-      MONOLITH_URL: http://monolith:8080
-      #монолит
-      MOVIES_SERVICE_URL: http://movies-service:8081 #сервис movies
-      EVENTS_SERVICE_URL: http://events-service:8082 
-      GRADUAL_MIGRATION: "true" # вкл/выкл простого фиче-флага
-      MOVIES_MIGRATION_PERCENT: "50" # процент миграции
-    networks:
-      - cinemaabyss-network
+#### Инструкция по развертыванию/остановке
+1. Сборка и запуск
+`sudo docker compose up -d --build`
+2. Остановка всех контейнеров
+`sudo docker compose down -v`
+3. Удаление старых образов
+`sudo docker system prune -a`
+
+#### Проверка конфигурации:
+    curl http://localhost:8000/health | jq
+##### Response:
 ```
+{
+  "config": {
+    "gradual_migration": true,
+    "movies_migration_percent": 50
+  },
+  "status": "healthy"
+}
+```
+#### Проверка events
+    curl http://localhost:8000/api/events/health | jq
+##### Response:
+```
+{
+  "kafka": "connected",
+  "status": true,
+  "topics": [
+    "movie-events",
+    "user-events",
+    "payment-events"
+  ]
+}
+```
+#### Отправка тестового события
+    curl -X POST http://localhost:8000/api/events/movie \
+      -H "Content-Type: application/json" \
+      -d '{"movie_id":1,"title":"Inception","action":"viewed","user_id":1}' \
+      | jq
 
-- После реализации запустите postman тесты - они все должны быть зеленые.
-- Отправьте запросы к API Gateway:
-   ```bash
-   curl http://localhost:8000/api/movies
-   ```
-- Протестируйте постепенный переход, изменив переменную окружения MOVIES_MIGRATION_PERCENT в файле docker-compose.yml.
+#### Проверка логов events-service
+sudo docker compose logs events-service --tail 50
+##### Response:
+```
+cinemaabyss-events-service  | 2026/02/17 18:20:53 Movie event published: movie_id=1, action=viewed, partition=0, offset=0
+cinemaabyss-events-service  | 2026/02/17 18:20:53 Received message from topic movie-events at offset 0: {"id":"movie-1-viewed-1771352453083199870","type":"movie","timestamp":"2026-02-17T18:20:53.083202724Z","payload":{"movie_id":1,"title":"Inception","action":"viewed","user_id":1}}
+cinemaabyss-events-service  | 2026/02/17 18:20:53 [Consumer] Movie event processed: movie_id=1, action=viewed
+```
+#### Тестирование API Gateway:
+    curl http://localhost:8000/api/movies
 
 ### 2. Kafka
- Вам как архитектуру нужно также проверить гипотезу насколько просто реализовать применение Kafka в данной архитектуре.
+Реализован MVP сервис events на Go в ./src/microservices/events с поддержкой:
 
-Для этого нужно сделать MVP сервис events, который будет при вызове API создавать и сам же читать сообщения в топике Kafka.
+- Producer API для публикации событий в Kafka:
+    - POST /api/events/movie - публикация в топик movie-events.
+    - POST /api/events/user - публикация в топик user-events.
+    - POST /api/events/payment - публикация в топик payment-events.
+- Consumer, подписанный на все три топика, с логированием полученных сообщений.
+- Интеграция с Kafka UI для мониторинга.
 
-    - Разработайте сервис на любом языке программирования с consumer'ами и producer'ами.
-    - Реализуйте простой API, при вызове которого будут создаваться события User/Payment/Movie и обрабатываться внутри сервиса с записью в лог
-    - Добавьте в docker-compose новый сервис, kafka там уже есть
+#### Запуск тестов
+1. `cd architecture-pro-cinemaabyss/tests/postman`
+2. `npm install`
+3. `npm run test:local`
 
-Необходимые тесты для проверки этого API вызываются при запуске npm run test:local из папки tests/postman 
-Приложите скриншот тестов и скриншот состояния топиков Kafka http://localhost:8090 
+#### Скриншот тестов:
+![Postman Tests](screenshots/postman-tests.png)
+
+#### Скриншот состояния топиков Kafka:
+![Kafka UI Topics](screenshots/kafka-ui-topics.png)
 
 
 ## Задание 3
