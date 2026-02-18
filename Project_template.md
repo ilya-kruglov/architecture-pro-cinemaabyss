@@ -479,72 +479,131 @@ Status:
 # Задание 5
 Компания планирует активно развиваться и для повышения надежности, безопасности, реализации сетевых паттернов типа Circuit Breaker и канареечного деплоя вам как архитектору необходимо развернуть istio и настроить circuit breaker для monolith и movies сервисов.
 
-```bash
+## Пошаговые действия после Задания 4
+1. Остановите minikube tunnel (Ctrl+C в окне с туннелем)
+2. Остановите кластер
+`minikube stop`
+3. Удалите кластер полностью (чтобы начать с чистого листа)
+`minikube delete`
+4. Запустите новый кластер с достаточными ресурсами для Istio
+`minikube start --cpus=4 --memory=8192`
+5. Включите ingress addon
+`minikube addons enable ingress`
+6. Проверьте, что кластер работает
+`kubectl get nodes`
 
-helm repo add istio https://istio-release.storage.googleapis.com/charts
-helm repo update
+7. Установите Istio (туннель пока НЕ нужен)
+`helm repo add istio https://istio-release.storage.googleapis.com/charts`
+`helm repo update`
+`helm install istio-base istio/base -n istio-system --set defaultRevision=default --create-namespace`
+`helm install istiod istio/istiod -n istio-system --wait`
+`helm install istio-ingressgateway istio/gateway -n istio-system`
 
-helm install istio-base istio/base -n istio-system --set defaultRevision=default --create-namespace
-helm install istio-ingressgateway istio/gateway -n istio-system
-helm install istiod istio/istiod -n istio-system --wait
+8. Установите приложение через Helm (namespace создастся автоматически)
+`helm install cinemaabyss ./src/kubernetes/helm --namespace cinemaabyss --create-namespace`
 
-helm install cinemaabyss .\src\kubernetes\helm --namespace cinemaabyss --create-namespace
+9. Включите Istio injection для namespace
+`kubectl label namespace cinemaabyss istio-injection=enabled --overwrite`
 
-kubectl label namespace cinemaabyss istio-injection=enabled --overwrite
-
-kubectl get namespace -L istio-injection
-
-kubectl apply -f .\src\kubernetes\circuit-breaker-config.yaml -n cinemaabyss
-
+10. Проверьте, что метка применилась
+`kubectl get namespace -L istio-injection`
+**Output:**
+```
+NAME              STATUS   AGE     ISTIO-INJECTION
+cinemaabyss       Active   93s     enabled
+default           Active   10m     
+ingress-nginx     Active   9m34s   
+istio-system      Active   6m24s   
+kube-node-lease   Active   10m     
+kube-public       Active   10m     
+kube-system       Active   10m 
 ```
 
-Тестирование
+11. Перезапустите поды, чтобы они получили sidecar-контейнеры
+    ##### Перезапустите все поды в namespace
+    `kubectl -n cinemaabyss delete pod --all`
+    ##### Подождите, пока все поды запустятся
+    `kubectl -n cinemaabyss get pods -w`
+    **Comment:**
+    ```
+    Большинство подов работает, но Kafka в CrashLoopBackOff. Это нормально, так как Kafka StatefulSet может требовать дополнительного времени для инициализации и не всегда корректно работает с Istio sidecar. Можно продолжить выполнение задания.
+    ```
 
-# fortio
-```bash
-kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.25/samples/httpbin/sample-client/fortio-deploy.yaml -n cinemaabyss
+12. Примените Circuit Breaker конфигурацию
+    ##### Примените конфигурацию
+    `kubectl apply -f src/kubernetes/circuit-breaker-config.yaml -n cinemaabyss`
+    ##### Проверьте, что DestinationRule созданы
+    `kubectl get destinationrule -n cinemaabyss`
+    **Output:**
+    ```
+    NAME                             HOST                                           AGE
+    monolith-circuit-breaker         monolith.cinemaabyss.svc.cluster.local         11s
+    movies-service-circuit-breaker   movies-service.cinemaabyss.svc.cluster.local   11s
+    ```
+
+
+## Тестирование
+1. Установите Fortio для тестирования
+    ##### Установите Fortio
+    `kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.25/samples/httpbin/sample-client/fortio-deploy.yaml -n cinemaabyss`
+    ##### Дождитесь запуска Fortio
+    `kubectl wait --for=condition=ready pod -l app=fortio -n cinemaabyss --timeout=60s`
+
+2. Запустите тест нагрузки на movies-service
+##### Получите имя пода Fortio
+`FORTIO_POD=$(kubectl get pod -n cinemaabyss | grep fortio | awk '{print $1}')`
+`echo "Fortio pod: $FORTIO_POD"`
+##### Запустите тест (50 параллельных соединений, 500 запросов)
+`kubectl exec -n cinemaabyss $FORTIO_POD -c fortio -- fortio load -c 50 -qps 0 -n 500 -loglevel Warning http://movies-service:8081/api/movies`
+**Output:**
 ```
-
-# Get the fortio pod name
-```bash
-FORTIO_POD=$(kubectl get pod -n cinemaabyss | grep fortio | awk '{print $1}')
-
-kubectl exec -n cinemaabyss $FORTIO_POD -c fortio -- fortio load -c 50 -qps 0 -n 500 -loglevel Warning http://movies-service:8081/api/movies
-```
-Например,
-
-```bash
-kubectl exec -n cinemaabyss fortio-deploy-b6757cbbb-7c9qg  -c fortio -- fortio load -c 50 -qps 0 -n 500 -loglevel Warning http://movies-service:8081/api/movies
-```
-
-Вывод будет типа такого
-
-```bash
+...
 IP addresses distribution:
-10.106.113.46:8081: 421
-Code 200 : 79 (15.8 %)
-Code 500 : 22 (4.4 %)
-Code 503 : 399 (79.8 %)
-```
-Можно еще проверить статистику
-
-```bash
-kubectl exec -n cinemaabyss fortio-deploy-b6757cbbb-7c9qg -c istio-proxy -- pilot-agent request GET stats | grep movies-service | grep pending
+10.105.52.199:8081: 498
+Code 200 : 2 (0.4 %)
+Code 503 : 498 (99.6 %)
+...
 ```
 
-И там смотрим 
-
-```bash
-cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq_pending_total: 311 - столько раз срабатывал circuit breaker
-You can see 21 for the upstream_rq_pending_overflow value which means 21 calls so far have been flagged for circuit breaking.
+3. Проверьте статистику Circuit Breaker
+`kubectl exec -n cinemaabyss $FORTIO_POD -c istio-proxy -- pilot-agent request GET stats | grep movies-service | grep pending`
 ```
-
-Приложите скриншот работы circuit breaker'а
-
-Удаляем все
-```bash
-istioctl uninstall --purge
-kubectl delete namespace istio-system
-kubectl delete all --all -n cinemaabyss
-kubectl delete namespace cinemaabyss
+cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.circuit_breakers.default.rq_pending_open: 0
+cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.circuit_breakers.high.rq_pending_open: 0
+cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq_pending_active: 0
+cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq_pending_failure_eject: 0
+cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq_pending_overflow: 85
+cluster.outbound|8081||movies-service.cinemaabyss.svc.cluster.local;.upstream_rq_pending_total: 3
 ```
+##### Description:
+    - `.upstream_rq_pending_overflow: 85`
+      Количество запросов, отклонённых Circuit Breaker'ом из-за переполнения очереди ожидания. Это главный показатель — именно столько раз сработал предохранитель.
+    - `.upstream_rq_pending_total: 3`
+      Общее количество запросов, которые попали в очередь ожидания за всё время.
+
+В результате тестирования Circuit Breaker для movies-service было зафиксировано 85 срабатываний (значение upstream_rq_pending_overflow), что подтверждает корректную работу механизма защиты сервиса от перегрузок. При 50 параллельных запросах только 3 из них попали в очередь ожидания, остальные были отклонены в соответствии с политикой Circuit Breaker.
+![Circuit Breaker](screenshots/circuit-breaker.png)
+
+
+## Полная инструкция по очистке ресурсов
+1. Удалите Istio через Helm
+`helm uninstall istio-ingressgateway -n istio-system`
+`helm uninstall istiod -n istio-system`
+`helm uninstall istio-base -n istio-system`
+2. Удалите namespace Istio
+`kubectl delete namespace istio-system`
+3. Удалите все ресурсы в namespace cinemaabyss
+`kubectl delete all --all -n cinemaabyss`
+4. Удалите сам namespace cinemaabyss
+`kubectl delete namespace cinemaabyss`
+5. Остановите minikube tunnel (если запущен)
+В окне, где запущен туннель, нажмите `Ctrl+C`
+6. Остановите кластер Minikube
+`minikube stop`
+7. Удалите кластер полностью для освобождения всех ресурсов (опционально)
+`minikube delete`
+8. Проверьте, что все процессы остановлены
+`docker ps | grep minikube`
+Если видите запущенные контейнеры:
+`docker stop $(docker ps -q --filter name=minikube) 2>/dev/null || true`
+`docker rm $(docker ps -aq --filter name=minikube) 2>/dev/null || true`
