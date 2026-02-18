@@ -1,12 +1,12 @@
 name: Docker Build and Push
 
 on:
-  workflow_dispatch:
   push:
     branches: [ main, cinema ]
     paths:
       - 'src/**'
       - '.github/workflows/docker-build-push.yml'
+  workflow_dispatch:
   release:
     types: [published]
 
