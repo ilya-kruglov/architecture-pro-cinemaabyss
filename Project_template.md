@@ -440,78 +440,40 @@ Status:
 
 
 ## Задание 4
-Для простоты дальнейшего обновления и развертывания вам как архитектуру необходимо так же реализовать helm-чарты для прокси-сервиса и проверить работу 
+1. Запустите Minikube заново
+`minikube start`
 
-Для этого:
-1. Перейдите в директорию helm и отредактируйте файл values.yaml
+2. Включите ingress addon
+`minikube addons enable ingress`
 
-```yaml
-# Proxy service configuration
-proxyService:
-  enabled: true
-  image:
-    repository: ghcr.io/db-exp/cinemaabysstest/proxy-service
-    tag: latest
-    pullPolicy: Always
-  replicas: 1
-  resources:
-    limits:
-      cpu: 300m
-      memory: 256Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
-  service:
-    port: 80
-    targetPort: 8000
-    type: ClusterIP
-```
+3. Проверьте, что кластер работает
+`kubectl get nodes`
+`kubectl cluster-info`
+`kubectl get pods -n cinemaabyss -w`
 
-- Вместо ghcr.io/db-exp/cinemaabysstest/proxy-service напишите свой путь до образа для всех сервисов
-- для imagePullSecret проставьте свое значение (скопируйте из конфигурации kubernetes)
-  ```yaml
-  imagePullSecrets:
-      dockerconfigjson: ewoJImF1dGhzIjogewoJCSJnaGNyLmlvIjogewoJCQkiYXV0aCI6ICJaR0l0Wlhod09tZG9jRjl2UTJocVZIa3dhMWhKVDIxWmFVZHJOV2hRUW10aFVXbFZSbTVaTjJRMFNYUjRZMWM9IgoJCX0KCX0sCgkiY3JlZHNTdG9yZSI6ICJkZXNrdG9wIiwKCSJjdXJyZW50Q29udGV4dCI6ICJkZXNrdG9wLWxpbnV4IiwKCSJwbHVnaW5zIjogewoJCSIteC1jbGktaGludHMiOiB7CgkJCSJlbmFibGVkIjogInRydWUiCgkJfQoJfSwKCSJmZWF0dXJlcyI6IHsKCQkiaG9va3MiOiAidHJ1ZSIKCX0KfQ==
-  ```
+4. Сначала удалим установку руками (без helm) из задания 3
+`kubectl delete namespace cinemaabyss`
 
-2. В папке ./templates/services заполните шаблоны для proxy-service.yaml и events-service.yaml (опирайтесь на свою kubernetes конфигурацию - смысл helm'а сделать шаблоны для быстрого обновления и установки)
+5. Установите через Helm
+`cd architecture-pro-cinemaabyss`
+`helm install cinemaabyss ./src/kubernetes/helm --namespace cinemaabyss --create-namespace`
 
-```yaml
-template:
-    metadata:
-      labels:
-        app: proxy-service
-    spec:
-      containers:
-       Тут ваша конфигурация
-```
+Если после запуска обновляли файл `src/kubernetes/helm/values.yaml`, то:
+`helm upgrade cinemaabyss ./src/kubernetes/helm --namespace cinemaabyss`
 
-3. Проверьте установку
-Сначала удалим установку руками
+6. Измените тип сервиса ingress-nginx-controller на LoadBalancer
+`kubectl patch svc -n ingress-nginx ingress-nginx-controller -p '{"spec":{"type":"LoadBalancer"}}'`
 
-```bash
-kubectl delete all --all -n cinemaabyss
-kubectl delete  namespace cinemaabyss
-```
-Запустите 
-```bash
-helm install cinemaabyss .\src\kubernetes\helm --namespace cinemaabyss --create-namespace
-```
-Если в процессе будет ошибка
-```code
-[2025-04-08 21:43:38,780] ERROR Fatal error during KafkaServer startup. Prepare to shutdown (kafka.server.KafkaServer)
-kafka.common.InconsistentClusterIdException: The Cluster ID OkOjGPrdRimp8nkFohYkCw doesn't match stored clusterId Some(sbkcoiSiQV2h_mQpwy05zQ) in meta.properties. The broker is trying to join the wrong cluster. Configured zookeeper.connect may be wrong.
-```
+7. Запустите туннель (в отдельном терминале)
+`minikube tunnel`
 
-Проверьте развертывание:
-```bash
-kubectl get pods -n cinemaabyss
-minikube tunnel
-```
+8. Проверьте доступ
+`curl http://cinemaabyss.example.com/api/movies`
+![Movies list](screenshots/movies-list.png)
 
-Потом вызовите 
-https://cinemaabyss.example.com/api/movies
-и приложите скриншот развертывания helm и вывода https://cinemaabyss.example.com/api/movies
+9. Скриншот развертывания helm
+![Helm Install](screenshots/helm-install.png)
+![Helm Upgrade](screenshots/helm-upgrade.png)
 
 
 # Задание 5
