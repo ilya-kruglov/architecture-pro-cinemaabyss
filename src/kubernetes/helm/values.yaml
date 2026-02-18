@@ -5,7 +5,8 @@ global:
 
 # Image pull secrets
 imagePullSecrets:
-  dockerconfigjson: ewoJImF1dGhzIjogewoJCSJnaGNyLmlvIjogewoJCQkiYXV0aCI6
+  dockerconfigjson: ewogICJhdXRocyI6IHsKICAgICJnaGNyLmlvIjogewogICAgICAiYXV0aCI6ICJhV3g1WVMxcmNuVm5iRzkyT21kb2NGOVFTbVpMTVhWeVkybFVTV0ZJUWpOVFFuVkJZWEZhYlhsdFpqQktkazB6WlRSSWJEVT0iCiAgICB9CiAgfQp9Cg==
+
 # Database configuration
 database:
   host: postgres
@@ -33,7 +34,7 @@ database:
 monolith:
   enabled: true
   image:
-    repository: ghcr.io/db-exp/cinemaabysstest/monolith
+    repository: ghcr.io/ilya-kruglov/architecture-pro-cinemaabyss/monolith
     tag: latest
     pullPolicy: Always
   replicas: 1
@@ -53,7 +54,7 @@ monolith:
 proxyService:
   enabled: true
   image:
-    repository: ghcr.io/db-exp/cinemaabysstest/proxy-service
+    repository: ghcr.io/ilya-kruglov/architecture-pro-cinemaabyss/proxy-service
     tag: latest
     pullPolicy: Always
   replicas: 1
@@ -73,7 +74,7 @@ proxyService:
 moviesService:
   enabled: true
   image:
-    repository: ghcr.io/db-exp/cinemaabysstest/movies-service
+    repository: ghcr.io/ilya-kruglov/architecture-pro-cinemaabyss/movies-service
     tag: latest
     pullPolicy: Always
   replicas: 1
@@ -93,7 +94,7 @@ moviesService:
 eventsService:
   enabled: true
   image:
-    repository: ghcr.io/db-exp/cinemaabysstest/events-service
+    repository: ghcr.io/ilya-kruglov/architecture-pro-cinemaabyss/events-service
     tag: latest
     pullPolicy: Always
   replicas: 1
@@ -109,7 +110,7 @@ eventsService:
     targetPort: 8082
     type: ClusterIP
 
-# Kafka configuration
+# Kafka configuration (остаётся без изменений)
 kafka:
   enabled: true
   image:
@@ -177,6 +178,22 @@ ingress:
           pathType: Prefix
           service: events-service
           port: 8082
+        - path: /api/movies
+          pathType: Prefix
+          service: proxy-service
+          port: 80
+        - path: /api/users
+          pathType: Prefix
+          service: proxy-service
+          port: 80
+        - path: /api/payments
+          pathType: Prefix
+          service: proxy-service
+          port: 80
+        - path: /api/subscriptions
+          pathType: Prefix
+          service: proxy-service
+          port: 80
 
 # Application configuration
 config:

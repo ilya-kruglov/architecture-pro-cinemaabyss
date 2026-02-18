@@ -1,0 +1,82 @@
+@startuml Кинобездна - To-Be архитектура (C4 контейнеры)
+title Кинобездна - To-Be архитектура (C4 контейнеры)
+
+skinparam component {
+  BackgroundColor LightBlue
+  BorderColor Black
+  FontSize 14
+}
+
+skinparam database {
+  BackgroundColor LightGreen
+  BorderColor Black
+}
+
+skinparam queue {
+  BackgroundColor LightYellow
+  BorderColor Black
+}
+
+skinparam person {
+  BackgroundColor White
+  BorderColor Black
+}
+
+' Персоны
+actor "Пользователь" as user
+actor "Платежная система" as payment_system <<external>>
+actor "Рекомендательная система" as recommendation_system <<external>>
+actor "Маркетинговые системы" as marketing_system <<external>>
+
+rectangle "Кинобездна (To-Be)" {
+  
+  ' API Gateway
+  component "API Gateway\nKong/Nginx" as gateway <<container>> {
+  }
+  
+  ' Микросервисы
+  component "Auth Service\nPython/FastAPI" as auth <<container>>
+  component "User Service\nPython/FastAPI" as users <<container>>
+  component "Payment Service\nPython/FastAPI" as payments <<container>>
+  component "Metadata Service\nPython/FastAPI" as metadata <<container>>
+  component "Content Service\nPython/FastAPI" as content <<container>>
+  
+  ' Базы данных
+  database "Auth DB\nPostgreSQL" as auth_db <<database>>
+  database "Users DB\nPostgreSQL" as users_db <<database>>
+  database "Payments DB\nPostgreSQL" as payments_db <<database>>
+  database "Metadata DB\nPostgreSQL" as metadata_db <<database>>
+  
+  ' Хранилища и очереди
+  database "S3 Storage\nMinIO/S3" as s3 <<storage>>
+  queue "Kafka" as kafka <<queue>>
+  
+  ' Связи пользователя
+  user --> gateway : "API запросы (HTTPS/REST)\nавторизация, просмотр, оценка"
+  
+  ' Связи через gateway
+  gateway --> auth : "проверка токена,\nрегистрация, логин (gRPC/HTTP)"
+  gateway --> users : "избранное, оценки пользователя\n(gRPC/HTTP)"
+  gateway --> payments : "оформление подписки,\nпроверка статуса (gRPC/HTTP)"
+  gateway --> metadata : "поиск фильмов,\nжанры, актеры (gRPC/HTTP)"
+  gateway --> content : "получение видео,\nплейлисты (gRPC/HTTP)"
+  
+  ' Связи с базами данных
+  auth --> auth_db : "CRUD пользователей,\nхэши паролей (SQL)"
+  users --> users_db : "CRUD избранного,\nоценок (SQL)"
+  payments --> payments_db : "CRUD платежей,\nподписок (SQL)"
+  metadata --> metadata_db : "CRUD метаданных\nфильмов (SQL)"
+  content --> s3 : "чтение видеофайлов,\nстатики (S3 API)"
+  
+  ' Связи с Kafka
+  payments --> kafka : "топики: payments\nсобытия: payment.completed,\nsubscription.activated"
+  users --> kafka : "топики: users\nсобытия: movie.rated,\nfavorite.added"
+  metadata --> kafka : "топики: metadata\nсобытия: movie.added,\nmetadata.updated"
+  
+  ' Связи с внешними системами
+  payments --> payment_system : "создание платежа,\nобработка возвратов (REST API)"
+  metadata --> recommendation_system : "запрос персональных\nрекомендаций (REST API)"
+  kafka --> marketing_system : "консьюмеры для аналитики\nи маркетинга (Kafka API)"
+}
+
+@enduml
