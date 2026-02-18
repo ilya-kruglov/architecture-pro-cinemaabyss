@@ -6,19 +6,12 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: "nginx"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
   rules:
     - host: cinemaabyss.example.com
       http:
         paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: proxy-service
-                port:
-                  number: 8000
+          # Сначала идут самые конкретные пути
           - path: /api/events
             pathType: Prefix
             backend:
@@ -48,6 +41,14 @@ spec:
                 port:
                   number: 8000
           - path: /api/subscriptions
+            pathType: Prefix
+            backend:
+              service:
+                name: proxy-service
+                port:
+                  number: 8000
+          # В самом конце - общий путь "/"
+          - path: /
             pathType: Prefix
             backend:
               service:
